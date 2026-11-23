@@ -1,242 +1,211 @@
 #include <iostream>
+#include <vector>
+#include <queue>
+#include <string>
 #include <fstream>
 #include <sstream>
-#include <vector>
-#include <map>
-#include <queue>
 #include <algorithm>
-#include <string>
-#include <cstdlib>
+#include <limits>
 
 using namespace std;
 
-class Task {
-private:
+struct Task {
     int id;
     string title;
     int priority;
     string deadline;
     bool completed;
-
-public:
-    Task() : id(0), priority(1), completed(false) {}
-
-    Task(int id, string title, int priority, string deadline, bool completed)
-        : id(id), title(title), priority(priority), deadline(deadline), completed(completed) {}
-
-    int getId() const { return id; }
-    string getTitle() const { return title; }
-    int getPriority() const { return priority; }
-    string getDeadline() const { return deadline; }
-    bool isCompleted() const { return completed; }
-
-    void markCompleted() { completed = true; }
-
-    string toCSV() const {
-        ostringstream oss;
-        oss << id << "," << title << "," << priority << "," << deadline << "," << (completed ? "1" : "0");
-        return oss.str();
-    }
-
-    void display() const {
-        cout << "[" << (completed ? "DONE" : "PENDING") << "] "
-             << "ID: " << id
-             << " | Priority: P" << priority
-             << " | Due: " << deadline
-             << " | " << title << "\n";
-    }
 };
 
 struct ComparePriority {
     bool operator()(const Task& a, const Task& b) const {
-        if (a.getPriority() == b.getPriority()) {
-            return a.getDeadline() > b.getDeadline();
+        if (a.priority != b.priority) {
+            return a.priority < b.priority;
         }
-        return a.getPriority() < b.getPriority();
+        return a.id > b.id;
     }
 };
 
-bool compareAllTasks(const Task& a, const Task& b) {
-    if (a.isCompleted() != b.isCompleted())
-        return !a.isCompleted();
-    if (a.getPriority() != b.getPriority())
-        return a.getPriority() > b.getPriority();
-    return a.getDeadline() < b.getDeadline();
+int readInt(const string& prompt) {
+    int value;
+    while (true) {
+        cout << prompt;
+        if (cin >> value) {
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            return value;
+        }
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Invalid input. Please enter a number.\n";
+    }
+}
+
+string readLine(const string& prompt) {
+    string line;
+    cout << prompt;
+    getline(cin, line);
+    return line;
 }
 
 class TaskManager {
 private:
-    map<int, Task> taskMap;
+    vector<Task> tasks;
+    int nextId = 1;
     string filename;
-    int nextId;
+
+    string escapeCsv(const string& s) {
+        string out = s;
+        replace(out.begin(), out.end(), ',', ';');
+        return out;
+    }
 
 public:
-    TaskManager(string file) : filename(file), nextId(1) {
-        loadFromFile();
+    TaskManager(const string& file) : filename(file) {
+        loadFromCsv();
     }
 
-    ~TaskManager() {
-        saveToFile();
-    }
-
-    void addTask(const string& title, int priority, const string& deadline) {
-        if (priority < 1 || priority > 5) {
-            cout << "Invalid priority! Setting default priority to 3.\n";
-            priority = 3;
-        }
-        Task newTask(nextId, title, priority, deadline, false);
-        taskMap[nextId] = newTask;
-        cout << "Task added successfully with ID: " << nextId << "\n";
-        nextId++;
-        saveToFile();
-    }
-
-    void completeTask(int id) {
-        map<int, Task>::iterator it = taskMap.find(id);
-        if (it == taskMap.end()) {
-            cout << "Task ID " << id << " not found.\n";
+    void loadFromCsv() {
+        ifstream in(filename);
+        if (!in.is_open()) {
             return;
         }
-        it->second.markCompleted();
-        cout << "Marked Task #" << id << " as completed.\n";
-        saveToFile();
-    }
-
-    void deleteTask(int id) {
-        if (taskMap.erase(id) > 0) {
-            cout << "Deleted Task #" << id << ".\n";
-            saveToFile();
-        } else {
-            cout << "Task ID " << id << " not found.\n";
-        }
-    }
-
-    void showNextUrgentTask() const {
-        priority_queue<Task, vector<Task>, ComparePriority> pq;
-        for (map<int, Task>::const_iterator it = taskMap.begin(); it != taskMap.end(); ++it) {
-            if (!it->second.isCompleted()) {
-                pq.push(it->second);
-            }
-        }
-        if (pq.empty()) {
-            cout << "No pending tasks! You're all caught up.\n";
-            return;
-        }
-        cout << "\n--- Most Urgent Pending Task ---\n";
-        pq.top().display();
-    }
-
-    void listAllTasksSorted() const {
-        if (taskMap.empty()) {
-            cout << "No tasks available.\n";
-            return;
-        }
-        vector<Task> list;
-        for (map<int, Task>::const_iterator it = taskMap.begin(); it != taskMap.end(); ++it) {
-            list.push_back(it->second);
-        }
-        sort(list.begin(), list.end(), compareAllTasks);
-
-        cout << "\n--- All Tasks (Sorted by Status & Priority) ---\n";
-        for (size_t i = 0; i < list.size(); ++i) {
-            list[i].display();
-        }
-    }
-
-    void saveToFile() const {
-        ofstream outFile(filename.c_str());
-        if (!outFile) {
-            cerr << "Error saving to file!\n";
-            return;
-        }
-        for (map<int, Task>::const_iterator it = taskMap.begin(); it != taskMap.end(); ++it) {
-            outFile << it->second.toCSV() << "\n";
-        }
-        outFile.close();
-    }
-
-    void loadFromFile() {
-        ifstream inFile(filename.c_str());
-        if (!inFile) return;
-
         string line;
-        while (getline(inFile, line)) {
+        getline(in, line);
+        while (getline(in, line)) {
             if (line.empty()) continue;
             stringstream ss(line);
             string idStr, title, prioStr, deadline, compStr;
-
-            getline(ss, idStr, ',');
-            getline(ss, title, ',');
-            getline(ss, prioStr, ',');
-            getline(ss, deadline, ',');
-            getline(ss, compStr, ',');
-
-            int id = atoi(idStr.c_str());
-            int priority = atoi(prioStr.c_str());
-            bool completed = (compStr == "1");
-
-            taskMap[id] = Task(id, title, priority, deadline, completed);
-            if (id + 1 > nextId) {
-                nextId = id + 1;
+            if (getline(ss, idStr, ',') &&
+                getline(ss, title, ',') &&
+                getline(ss, prioStr, ',') &&
+                getline(ss, deadline, ',') &&
+                getline(ss, compStr)) {
+                Task t;
+                t.id = stoi(idStr);
+                t.title = title;
+                t.priority = stoi(prioStr);
+                t.deadline = deadline;
+                t.completed = (compStr == "1" || compStr == "true");
+                tasks.push_back(t);
+                if (t.id >= nextId) {
+                    nextId = t.id + 1;
+                }
             }
         }
-        inFile.close();
+    }
+
+    void saveToCsv() {
+        ofstream out(filename);
+        out << "ID,Title,Priority,Deadline,Completed\n";
+        for (const auto& t : tasks) {
+            out << t.id << ","
+                << escapeCsv(t.title) << ","
+                << t.priority << ","
+                << escapeCsv(t.deadline) << ","
+                << (t.completed ? 1 : 0) << "\n";
+        }
+    }
+
+    void addTask(const string& title, int priority, const string& deadline) {
+        Task t{nextId++, title, priority, deadline, false};
+        tasks.push_back(t);
+        cout << "Task added with ID " << t.id << ".\n";
+    }
+
+    void listAllTasksSorted() {
+        if (tasks.empty()) {
+            cout << "No tasks found.\n";
+            return;
+        }
+        vector<Task> sorted = tasks;
+        sort(sorted.begin(), sorted.end(), [](const Task& a, const Task& b) {
+            if (a.priority != b.priority) return a.priority > b.priority;
+            return a.id < b.id;
+        });
+        for (const auto& t : sorted) {
+            cout << "[" << t.id << "] " << t.title
+                 << " | Priority: " << t.priority
+                 << " | Deadline: " << t.deadline
+                 << " | Status: " << (t.completed ? "Completed" : "Pending") << "\n";
+        }
+    }
+
+    void showNextUrgentTask() {
+        priority_queue<Task, vector<Task>, ComparePriority> pq;
+        for (const auto& t : tasks) {
+            if (!t.completed) {
+                pq.push(t);
+            }
+        }
+        if (pq.empty()) {
+            cout << "No pending urgent tasks.\n";
+            return;
+        }
+        const Task& top = pq.top();
+        cout << "Most Urgent Task -> [" << top.id << "] " << top.title
+             << " (Priority: " << top.priority << ", Deadline: " << top.deadline << ")\n";
+    }
+
+    void completeTask(int id) {
+        for (auto& t : tasks) {
+            if (t.id == id) {
+                t.completed = true;
+                cout << "Task " << id << " marked as completed.\n";
+                return;
+            }
+        }
+        cout << "Task ID not found.\n";
+    }
+
+    void deleteTask(int id) {
+        for (auto it = tasks.begin(); it != tasks.end(); ++it) {
+            if (it->id == id) {
+                tasks.erase(it);
+                cout << "Task " << id << " deleted.\n";
+                return;
+            }
+        }
+        cout << "Task ID not found.\n";
     }
 };
 
 int main() {
     TaskManager manager("tasks.csv");
-    int choice;
 
     while (true) {
-        cout << "\n=== C++ Task & Priority Scheduler ===\n"
-             << "1. Add Task\n"
-             << "2. View All Tasks (Sorted)\n"
-             << "3. View Most Urgent Task (Max-Heap)\n"
-             << "4. Mark Task Completed\n"
-             << "5. Delete Task\n"
-             << "0. Exit\n"
-             << "Enter choice: ";
+        cout << "\n=== C++ Task & Priority Scheduler ===\n";
+        cout << "1. Add Task\n";
+        cout << "2. View All Tasks (Sorted)\n";
+        cout << "3. View Most Urgent Task (Max-Heap)\n";
+        cout << "4. Mark Task Completed\n";
+        cout << "5. Delete Task\n";
+        cout << "0. Exit\n";
 
-        if (!(cin >> choice)) {
-            cin.clear();
-            cin.ignore(10000, '\n');
-            cout << "Invalid input. Enter a number.\n";
-            continue;
-        }
-        cin.ignore();
+        int choice = readInt("Enter choice: ");
 
-        if (choice == 0) {
-            cout << "Saved all changes. Goodbye!\n";
-            break;
-        } else if (choice == 1) {
-            string title, deadline;
-            int priority;
-            cout << "Enter task title (avoid commas): ";
-            getline(cin, title);
-            cout << "Enter priority (1-5, 5 = highest): ";
-            cin >> priority;
-            cin.ignore();
-            cout << "Enter deadline (YYYY-MM-DD): ";
-            getline(cin, deadline);
+        if (choice == 1) {
+            string title = readLine("Enter title: ");
+            int priority = readInt("Enter priority (higher = more urgent): ");
+            string deadline = readLine("Enter deadline: ");
             manager.addTask(title, priority, deadline);
         } else if (choice == 2) {
             manager.listAllTasksSorted();
         } else if (choice == 3) {
             manager.showNextUrgentTask();
         } else if (choice == 4) {
-            int id;
-            cout << "Enter Task ID to complete: ";
-            cin >> id;
+            int id = readInt("Enter Task ID to complete: ");
             manager.completeTask(id);
         } else if (choice == 5) {
-            int id;
-            cout << "Enter Task ID to delete: ";
-            cin >> id;
+            int id = readInt("Enter Task ID to delete: ");
             manager.deleteTask(id);
+        } else if (choice == 0) {
+            manager.saveToCsv();
+            cout << "Saved to tasks.csv. Goodbye!\n";
+            break;
         } else {
-            cout << "Invalid option.\n";
+            cout << "Invalid choice. Pick 0 to 5.\n";
         }
     }
+
     return 0;
 }
